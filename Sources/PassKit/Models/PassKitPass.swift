@@ -7,11 +7,12 @@
 
 import Vapor
 import Fluent
+import PassGenerator
 
 /// Represents the `Model` that stores PassKit passes.
-public protocol PassKitPass: Model where IDValue == UUID {
     /// The pass type
     var type: String { get set }
+public protocol PassKitPass: Model, PassConvertible where IDValue == UUID {
     
     /// The last time the pass was modified.
     var modified: Date { get set }

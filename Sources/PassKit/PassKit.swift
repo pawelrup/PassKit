@@ -12,7 +12,7 @@ import PassGenerator
 
 public protocol PassKit {
     associatedtype Registration: PassKitRegistration
-    associatedtype Pass: PassConvertible where Pass == Registration.PassType
+    associatedtype Pass where Pass == Registration.PassType
     associatedtype Device where Device == Registration.DeviceType
     associatedtype ErrorLog: PassKitErrorLog
     
