@@ -131,7 +131,6 @@ extension PassKit {
         let deviceLibraryIdentifier = req.parameters.get("deviceLibraryIdentifier")!
         
         return Pass.query(on: req.db)
-            .filter(\._$type == type)
             .filter(\._$id == serial)
             .first()
             .unwrap(or: Abort(.notFound))
@@ -142,13 +141,13 @@ extension PassKit {
                     .first()
                     .flatMap { device in
                         if let device = device {
-                            return Self.createRegistration(device: device, pass: pass, req: req)
+                            return Self.createRegistration(device: device, pass: pass, type: type, req: req)
                         } else {
                             let newDevice = Device(deviceLibraryIdentifier: deviceLibraryIdentifier, pushToken: pushToken)
                             
                             return newDevice
                                 .create(on: req.db)
-                                .flatMap { _ in Self.createRegistration(device: newDevice, pass: pass, req: req) }
+                                .flatMap { _ in Self.createRegistration(device: newDevice, pass: pass, type: type, req: req) }
                         }
                 }
         }
@@ -234,8 +233,8 @@ extension PassKit {
 // MARK: - Helpers
 extension PassKit {
     
-    private static func createRegistration(device: Device, pass: Pass, req: Request) -> EventLoopFuture<HTTPStatus> {
-        Registration.for(deviceLibraryIdentifier: device.deviceLibraryIdentifier, passTypeIdentifier: pass.type, on: req.db)
+    private static func createRegistration(device: Device, pass: Pass, type: String, req: Request) -> EventLoopFuture<HTTPStatus> {
+        Registration.for(deviceLibraryIdentifier: device.deviceLibraryIdentifier, passTypeIdentifier: type, on: req.db)
             .filter(Pass.self, \._$id == pass.id!)
             .first()
             .flatMap { registration in
@@ -264,7 +263,7 @@ extension PassKit {
                     var rawBytes = ByteBufferAllocator().buffer(capacity: payload.count)
                     rawBytes.writeBytes(payload)
                     
-                    return app.apns.send(rawBytes: rawBytes, pushType: .background, to: registration.device.pushToken, topic: registration.pass.type)
+                    return app.apns.send(rawBytes: rawBytes, pushType: .background, to: registration.device.pushToken, topic: type)
                         .flatMapError {
                             // Unless APNs said it was a bad device token, just ignore the error.
                             guard case let APNSwiftError.ResponseError.badRequest(response) = $0, response == .badDeviceToken else {
@@ -284,12 +283,12 @@ extension PassKit {
         }
     }
     
-    public static func sendPushNotifications(for pass: Pass, on db: Database, app: Application) -> EventLoopFuture<Void> {
+    public static func sendPushNotifications(for pass: Pass, of type: String, on db: Database, app: Application) -> EventLoopFuture<Void> {
         guard let id = pass.id else {
             return db.eventLoop.makeFailedFuture(FluentError.idRequired)
         }
         
-        return Self.sendPushNotificationsForPass(id: id, of: pass.type, on: db, app: app)
+        return Self.sendPushNotificationsForPass(id: id, of: type, on: db, app: app)
     }
     
     private static func registrationsForPass(id: UUID, of type: String, on db: Database) -> EventLoopFuture<[Registration]> {
@@ -297,11 +296,10 @@ extension PassKit {
         // wrapper, but there's not really any value to forcing that on them when
         // we can just do the query ourselves like this.
         Registration.query(on: db)
-            .join(\._$pass)
-            .join(\._$device)
+            .join(Pass.self, on: \Registration._$pass.$id == \Pass._$id)
+            .join(Device.self, on: \Registration._$device.$id == \Device._$id)
             .with(\._$pass)
             .with(\._$device)
-            .filter(Pass.self, \._$type == type)
             .filter(Pass.self, \._$id == id)
             .all()
     }
