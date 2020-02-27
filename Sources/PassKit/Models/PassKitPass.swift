@@ -15,7 +15,7 @@ public protocol PassKitPass: Model, PassConvertible where IDValue == UUID {
     /// The last time the pass was modified.
     var modified: Date { get set }
     
-    static func `for`(passTypeIdentifier: String, serialNumber: Self.IDValue, on db: Database) -> EventLoopFuture<Self>
+    static func `for`(serialNumber: UUID, on db: Database) -> EventLoopFuture<Self>
 }
 
 internal extension PassKitPass {
@@ -37,7 +37,7 @@ internal extension PassKitPass {
         return modified
     }
     
-    static func `for`(passTypeIdentifier: String, serialNumber: UUID, on db: Database) -> EventLoopFuture<Self> {
+    static func `for`(serialNumber: UUID, on db: Database) -> EventLoopFuture<Self> {
         Self.query(on: db)
             .filter(\._$id == serialNumber)
             .first()

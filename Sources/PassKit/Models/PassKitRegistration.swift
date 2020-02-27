@@ -39,7 +39,7 @@ internal extension PassKitRegistration {
         return pass
     }
     
-    static func `for`(deviceLibraryIdentifier: String, passTypeIdentifier: String, on db: Database) -> QueryBuilder<Self> {
+    static func `for`(deviceLibraryIdentifier: String, on db: Database) -> QueryBuilder<Self> {
         Self.query(on: db)
             .with(\._$pass)
             .with(\._$device)
