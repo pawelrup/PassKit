@@ -41,6 +41,8 @@ internal extension PassKitRegistration {
     
     static func `for`(deviceLibraryIdentifier: String, on db: Database) -> QueryBuilder<Self> {
         Self.query(on: db)
+            .join(PassType.self, on: \Self._$pass.$id == \PassType._$id)
+            .join(DeviceType.self, on: \Self._$device.$id == \DeviceType._$id)
             .with(\._$pass)
             .with(\._$device)
             .filter(DeviceType.self, \._$deviceLibraryIdentifier == deviceLibraryIdentifier)
