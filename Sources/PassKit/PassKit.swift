@@ -59,6 +59,7 @@ public extension Application.PassKit {
         v1.get("devices", ":deviceLibraryIdentifier", "registrations", ":passTypeIdentifier", use: passesForDevice)
         v1.post("log", use: logError)
         v1.get("log", use: getAllErrors)
+        v1.delete("log", use: deleteAllErrors)
         
         guard let code = authorizationCode ?? Environment.get("PASS_KIT_AUTHORIZATION") else {
             fatalError("Must pass in an authorization code")
@@ -125,6 +126,13 @@ extension Application.PassKit {
             .map { self.fetchers.first?.value }
             .unwrap(or: Abort(.notFound))
             .flatMap { $0.getAllLogs(on: req.db) }
+    }
+    
+    func deleteAllErrors(_ req: Request) throws -> EventLoopFuture<HTTPStatus> {
+        return req.eventLoop.future()
+            .map { self.fetchers.first?.value }
+            .unwrap(or: Abort(.notFound))
+            .flatMap { $0.deleteAllLogs(on: req.db, with: req.eventLoop) }
     }
     
     func registerDevice(_ req: Request) throws -> EventLoopFuture<HTTPStatus> {
