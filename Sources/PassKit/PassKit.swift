@@ -28,7 +28,7 @@ extension Application {
         struct ConfigurationKey: StorageKey {
             typealias Value = PassKitConfiguration
         }
-        let application: Application
+        private let application: Application
 
         public var configuration: PassKitConfiguration? {
             get {
@@ -81,7 +81,7 @@ public extension Application.PassKit {
 extension Application.PassKit {
     
     func passesForDevice(_ req: Request) throws -> EventLoopFuture<PassesForDeviceDto> {
-        application.logger.debug("Called passesForDevice")
+        application.logger.info("Called passesForDevice")
         
         guard let deviceLibraryIdentifier = req.parameters.get("deviceLibraryIdentifier"),
             let passTypeIdentifier = req.parameters.get("passTypeIdentifier") else {
@@ -89,12 +89,14 @@ extension Application.PassKit {
         }
         let passesUpdatedSince = req.parameters.get("passesUpdatedSince", as: TimeInterval.self)
         
+        application.logger.info("Returns pass for \(passTypeIdentifier) for \(deviceLibraryIdentifier).\(passesUpdatedSince.flatMap({ " Updated since \($0)" }) ?? "")")
+        
         return try fetchers.get(for: passTypeIdentifier)
             .registrations(forDeviceLibraryIdentifier: deviceLibraryIdentifier, passesUpdatedSince: passesUpdatedSince, on: req.db)
     }
     
     func logError(_ req: Request) throws -> EventLoopFuture<HTTPStatus> {
-        application.logger.debug("Called logError")
+        application.logger.info("Called logError")
         
         let body: ErrorLogDto
         
@@ -108,6 +110,8 @@ extension Application.PassKit {
             throw Abort(.badRequest)
         }
         
+        application.logger.info("Received error logs: \(body.logs.joined(separator: ",\n"))")
+        
         return req.eventLoop.future()
             .map { self.fetchers.first?.value }
             .unwrap(or: Abort(.notFound))
@@ -116,7 +120,7 @@ extension Application.PassKit {
     }
     
     func registerDevice(_ req: Request) throws -> EventLoopFuture<HTTPStatus> {
-        application.logger.debug("Called register device")
+        application.logger.info("Called register device")
         
         guard let deviceLibraryIdentifier = req.parameters.get("deviceLibraryIdentifier"),
             let passTypeIdentifier = req.parameters.get("passTypeIdentifier"),
@@ -132,12 +136,14 @@ extension Application.PassKit {
             throw Abort(.badRequest)
         }
         
+        application.logger.info("Received pass push token \(pushToken) for \(passTypeIdentifier) serial \(serialNumber) device \(deviceLibraryIdentifier)")
+        
         return try fetchers.get(for: passTypeIdentifier)
             .registerDevice(deviceLibraryIdentifier: deviceLibraryIdentifier, serialNumber: serialNumber, pushToken: pushToken, on: req.db, with: req.eventLoop)
     }
     
     func latestVersionOfPass(_ req: Request) throws -> EventLoopFuture<Response> {
-        application.logger.debug("Called latestVersionOfPass")
+        application.logger.info("Called latestVersionOfPass")
         let ifModifiedSince = req.headers[.ifModifiedSince].first.flatMap({ TimeInterval($0) }) ?? 0
         guard let passTypeIdentifier = req.parameters.get("passTypeIdentifier"),
             let serialNumber = req.parameters.get("serialNumber", as: UUID.self) else {
@@ -148,7 +154,7 @@ extension Application.PassKit {
     }
     
     func unregisterDevice(_ req: Request) throws -> EventLoopFuture<HTTPStatus> {
-        application.logger.debug("Called unregisterDevice")
+        application.logger.info("Called unregisterDevice")
         
         guard let deviceLibraryIdentifier = req.parameters.get("deviceLibraryIdentifier"),
             let passTypeIdentifier = req.parameters.get("passTypeIdentifier"),
@@ -156,12 +162,14 @@ extension Application.PassKit {
                 throw Abort(.badRequest)
         }
         
+        application.logger.info("Unregister device for \(passTypeIdentifier) serial \(serialNumber) device \(deviceLibraryIdentifier)")
+        
         return try fetchers.get(for: passTypeIdentifier)
             .unregisterDevice(deviceLibraryIdentifier: deviceLibraryIdentifier, serialNumber: serialNumber, on: req.db)
     }
     
     func pushUpdatesForPass(_ req: Request) throws -> EventLoopFuture<HTTPStatus> {
-        application.logger.debug("Called pushUpdatesForPass")
+        application.logger.info("Called pushUpdatesForPass")
         
         guard let passTypeIdentifier = req.parameters.get("passTypeIdentifier"),
             let serialNumber = req.parameters.get("serialNumber", as: UUID.self) else {
@@ -173,7 +181,7 @@ extension Application.PassKit {
     }
     
     func tokensForPassUpdate(_ req: Request) throws -> EventLoopFuture<[String]> {
-        application.logger.debug("Called tokensForPassUpdate")
+        application.logger.info("Called tokensForPassUpdate")
         
         guard let passTypeIdentifier = req.parameters.get("passTypeIdentifier"),
             let serialNumber = req.parameters.get("serialNumber", as: UUID.self) else {
