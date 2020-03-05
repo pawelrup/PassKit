@@ -116,7 +116,7 @@ extension Application.PassKit {
         
         return req.eventLoop.future()
             .map { self.fetchers.first?.value }
-            .unwrap(or: Abort(.notFound))
+            .unwrap(or: Abort(.notFound, reason: "Detcher not found. Weird…"))
             .flatMap { $0.saveLogs(body.logs, on: req.db) }
             .map { .ok }
     }
@@ -124,14 +124,14 @@ extension Application.PassKit {
     func getAllErrors(_ req: Request) throws -> EventLoopFuture<[String]> {
         return req.eventLoop.future()
             .map { self.fetchers.first?.value }
-            .unwrap(or: Abort(.notFound))
+            .unwrap(or: Abort(.notFound, reason: "Detcher not found. Weird…"))
             .flatMap { $0.getAllLogs(on: req.db) }
     }
     
     func deleteAllErrors(_ req: Request) throws -> EventLoopFuture<HTTPStatus> {
         return req.eventLoop.future()
             .map { self.fetchers.first?.value }
-            .unwrap(or: Abort(.notFound))
+            .unwrap(or: Abort(.notFound, reason: "Detcher not found. Weird…"))
             .flatMap { $0.deleteAllLogs(on: req.db, with: req.eventLoop) }
     }
     

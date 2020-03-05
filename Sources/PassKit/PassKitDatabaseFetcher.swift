@@ -75,7 +75,7 @@ extension PassKitDatabaseFetcher {
         Pass.query(on: db)
             .filter(\._$id == serialNumber)
             .first()
-            .unwrap(or: Abort(.notFound))
+            .unwrap(or: Abort(.notFound, reason: "registerDevice: Pass with serialNumber \(serialNumber) not found."))
             .flatMap { pass in
                 Device.query(on: db)
                     .filter(\._$deviceLibraryIdentifier == deviceLibraryIdentifier)
@@ -99,7 +99,7 @@ extension PassKitDatabaseFetcher {
         return Registration.for(deviceLibraryIdentifier: deviceLibraryIdentifier, on: db)
             .filter(Pass.self, \._$id == serialNumber)
             .first()
-            .unwrap(or: Abort(.notFound, reason: "Pass for given serial not found."))
+            .unwrap(or: Abort(.notFound, reason: "unregisterDevice: Pass with serialNumber \(serialNumber) for deviceLibraryIdentifier \(deviceLibraryIdentifier) not found."))
             .flatMap { $0.delete(on: db).map { .ok } }
     }
     

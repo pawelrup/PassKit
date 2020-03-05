@@ -41,6 +41,6 @@ internal extension PassKitPass {
         Self.query(on: db)
             .filter(\._$id == serialNumber)
             .first()
-            .unwrap(or: Abort(.notFound))
+            .unwrap(or: Abort(.notFound, reason: "Self: Pass for serialNumber \(serialNumber) not found"))
     }
 }
