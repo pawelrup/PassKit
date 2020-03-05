@@ -58,6 +58,12 @@ extension PassKitDatabaseFetcher {
             .flatten(on: db.eventLoop)
     }
     
+    func getAllLogs(on db: Database) -> EventLoopFuture<[String]> {
+        return ErrorLog.query(on: db)
+            .all()
+            .mapEach { $0.message }
+    }
+    
     func registerDevice(deviceLibraryIdentifier: String, serialNumber: UUID, pushToken: String, on db: Database, with eventLoop: EventLoop) throws -> EventLoopFuture<HTTPStatus> {
         Pass.query(on: db)
             .filter(\._$id == serialNumber)
@@ -86,7 +92,7 @@ extension PassKitDatabaseFetcher {
         return Registration.for(deviceLibraryIdentifier: deviceLibraryIdentifier, on: db)
             .filter(Pass.self, \._$id == serialNumber)
             .first()
-            .unwrap(or: Abort(.notFound))
+            .unwrap(or: Abort(.notFound, reason: "Pass for given serial not found."))
             .flatMap { $0.delete(on: db).map { .ok } }
     }
     
@@ -196,6 +202,7 @@ public struct AnyDatabaseFetcher {
     
     private let _registrations: (_ deviceLibraryIdentifier: String, _ passesUpdatedSince: TimeInterval?, _ db: Database) -> EventLoopFuture<PassesForDeviceDto>
     private let _saveLogs: (_ logs: [String], _ db: Database) -> EventLoopFuture<Void>
+    private let _getAllLogs: (_ db: Database) -> EventLoopFuture<[String]>
     private let _registerDevice: (_ deviceLibraryIdentifier: String, _ serialNumber: UUID, _ pushToken: String, _ db: Database, _ eventLoop: EventLoop) throws -> EventLoopFuture<HTTPStatus>
     private let _unregisterDevice: (_ deviceLibraryIdentifier: String, _ serialNumber: UUID, _ db: Database) -> EventLoopFuture<HTTPStatus>
     private let _latestVersionOfPass: (_ serialNumber: UUID, _ ifModifiedSince: TimeInterval, _ db: Database, _ eventLoop: EventLoop) -> EventLoopFuture<Response>
@@ -210,6 +217,7 @@ public struct AnyDatabaseFetcher {
         
         _registrations = databaseFetcher.registrations
         _saveLogs = databaseFetcher.saveLogs
+        _getAllLogs = databaseFetcher.getAllLogs
         _registerDevice = databaseFetcher.registerDevice
         _unregisterDevice = databaseFetcher.unregisterDevice
         _latestVersionOfPass = databaseFetcher.latestVersionOfPass
@@ -223,6 +231,10 @@ public struct AnyDatabaseFetcher {
     
     func saveLogs(_ logs: [String], on db: Database) -> EventLoopFuture<Void> {
         _saveLogs(logs, db)
+    }
+    
+    func getAllLogs(on db: Database) -> EventLoopFuture<[String]> {
+        _getAllLogs(db)
     }
     
     func registerDevice(deviceLibraryIdentifier: String, serialNumber: UUID, pushToken: String, on db: Database, with eventLoop: EventLoop) throws -> EventLoopFuture<HTTPStatus> {
