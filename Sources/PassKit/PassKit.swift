@@ -213,6 +213,9 @@ extension Application.PassKit {
 extension Application.PassKit {
     
     public func sendPushNotificationsForPass(id: UUID, of type: String, on db: Database) throws -> EventLoopFuture<Void> {
+        
+        application.logger.info("Trying to send push for \(id) of \(type)")
+        
         return try fetchers.get(for: type)
             .sendPushNotificationsForPass(id: id, type: type, on: db, using: application.apns)
     }

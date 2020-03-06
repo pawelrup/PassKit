@@ -107,7 +107,7 @@ extension PassKitDatabaseFetcher {
         return Pass.for(serialNumber: serialNumber, on: db)
             .flatMap { pass -> EventLoopFuture<Response> in
                 guard ifModifiedSince < pass.modified.timeIntervalSince1970 else {
-                    return eventLoop.makeFailedFuture(Abort(.notModified))
+                    return eventLoop.makeFailedFuture(Abort(.notModified, reason: "latestVersionOfPass: Pass wasn't modified since \(ifModifiedSince). Pass modify date \(pass.modified.timeIntervalSince1970)"))
                 }
                 return eventLoop.future(pass)
                     .generatePass(certificateURL: self.certificateURL, certificatePassword: self.certificatePassword, wwdrURL: self.wwdrURL, templateURL: self.templateURL)
@@ -168,6 +168,7 @@ extension PassKitDatabaseFetcher {
             .with(\._$device)
             .filter(Pass.self, \._$id == id)
             .all()
+            .guard({ !$0.isEmpty }, else: Abort(.notFound, reason: "No registrations found for pass \(id)."))
     }
     
     private static func createRegistration(device: Device, pass: Pass, on db: Database, with eventLoop: EventLoop) -> EventLoopFuture<HTTPStatus> {
