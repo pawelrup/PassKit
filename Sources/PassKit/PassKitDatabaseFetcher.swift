@@ -16,6 +16,8 @@ public protocol PassKitDatabaseFetcher {
     associatedtype Device where Device == Registration.DeviceType
     associatedtype ErrorLog: PassKitErrorLog
     
+    var logger: Logger { get }
+    
     var wwdrURL: URL { get }
     var templateURL: URL { get }
     var certificateURL: URL { get }
@@ -83,8 +85,10 @@ extension PassKitDatabaseFetcher {
                     .first()
                     .flatMap { device in
                         if let device = device {
+                            self.logger.info("registerDevice: Device exists, creating new registration")
                             return Self.createRegistration(device: device, pass: pass, on: db, with: eventLoop)
                         } else {
+                            self.logger.info("registerDevice: Creating new device and registration")
                             let newDevice = Device(deviceLibraryIdentifier: deviceLibraryIdentifier, pushToken: pushToken)
                             
                             return newDevice
@@ -104,6 +108,7 @@ extension PassKitDatabaseFetcher {
     }
     
     func latestVersionOfPass(serialNumber: UUID, ifModifiedSince: TimeInterval, on db: Database, with eventLoop: EventLoop) -> EventLoopFuture<Response> {
+        logger.info("latestVersionOfPass: Try return latest version of pass for \(serialNumber), ifModifiedSince \(ifModifiedSince)")
         return Pass.for(serialNumber: serialNumber, on: db)
             .flatMap { pass -> EventLoopFuture<Response> in
                 guard ifModifiedSince < pass.modified.timeIntervalSince1970 else {
@@ -139,10 +144,12 @@ extension PassKitDatabaseFetcher {
                     
                     return apns.send(rawBytes: rawBytes, pushType: .background, to: registration.device.pushToken, topic: type)
                         .flatMapError {
+                            self.logger.warning("Failed to send push")
                             // Unless APNs said it was a bad device token, just ignore the error.
                             guard case let APNSwiftError.ResponseError.badRequest(response) = $0, response == .badDeviceToken else {
                                 return db.eventLoop.future()
                             }
+                            self.logger.warning("Failed to send push: \(response). Deleting registration.")
                             
                             // Be sure the device deletes before the registration is deleted.
                             // If you let them run in parallel issues might arise depending on
