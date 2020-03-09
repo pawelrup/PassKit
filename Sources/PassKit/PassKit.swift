@@ -91,8 +91,6 @@ extension Application.PassKit {
         }
         let passesUpdatedSince = req.parameters.get("passesUpdatedSince", as: TimeInterval.self)
         
-        application.logger.info("Returns pass for \(passTypeIdentifier) for \(deviceLibraryIdentifier).\(passesUpdatedSince.flatMap({ " Updated since \($0)" }) ?? "")")
-        
         return try fetchers.get(for: passTypeIdentifier)
             .registrations(forDeviceLibraryIdentifier: deviceLibraryIdentifier, passesUpdatedSince: passesUpdatedSince, on: req.db)
     }
@@ -112,11 +110,9 @@ extension Application.PassKit {
             throw Abort(.badRequest)
         }
         
-        application.logger.info("Received error logs: \(body.logs.joined(separator: ",\n"))")
-        
         return req.eventLoop.future()
             .map { self.fetchers.first?.value }
-            .unwrap(or: Abort(.notFound, reason: "Detcher not found. Weird…"))
+            .unwrap(or: Abort(.notFound, reason: "Fetcher not found. Weird…"))
             .flatMap { $0.saveLogs(body.logs, on: req.db) }
             .map { .ok }
     }
@@ -136,7 +132,7 @@ extension Application.PassKit {
     }
     
     func registerDevice(_ req: Request) throws -> EventLoopFuture<HTTPStatus> {
-        application.logger.info("Called register device")
+        application.logger.info("Called registerDevice")
         
         guard let deviceLibraryIdentifier = req.parameters.get("deviceLibraryIdentifier"),
             let passTypeIdentifier = req.parameters.get("passTypeIdentifier"),
@@ -151,8 +147,6 @@ extension Application.PassKit {
         } catch {
             throw Abort(.badRequest)
         }
-        
-        application.logger.info("Received pass push token \(pushToken) for \(passTypeIdentifier) serial \(serialNumber) device \(deviceLibraryIdentifier)")
         
         return try fetchers.get(for: passTypeIdentifier)
             .registerDevice(deviceLibraryIdentifier: deviceLibraryIdentifier, serialNumber: serialNumber, pushToken: pushToken, on: req.db, with: req.eventLoop)
@@ -177,8 +171,6 @@ extension Application.PassKit {
             let serialNumber = req.parameters.get("serialNumber", as: UUID.self) else {
                 throw Abort(.badRequest)
         }
-        
-        application.logger.info("Unregister device for \(passTypeIdentifier) serial \(serialNumber) device \(deviceLibraryIdentifier)")
         
         return try fetchers.get(for: passTypeIdentifier)
             .unregisterDevice(deviceLibraryIdentifier: deviceLibraryIdentifier, serialNumber: serialNumber, on: req.db)
@@ -213,14 +205,14 @@ extension Application.PassKit {
 extension Application.PassKit {
     
     public func sendPushNotificationsForPass(id: UUID, of type: String, on db: Database) throws -> EventLoopFuture<Void> {
-        
-        application.logger.info("Trying to send push for \(id) of \(type)")
+        application.logger.info("Called sendPushNotificationsForPass")
         
         return try fetchers.get(for: type)
             .sendPushNotificationsForPass(id: id, type: type, on: db, using: application.apns)
     }
     
     public func sendPushNotifications<Pass: PassKitPass>(for pass: Pass, of type: String, on db: Database) throws -> EventLoopFuture<Void> {
+        application.logger.info("Called sendPushNotifications")
         guard let id = pass.id else {
             return db.eventLoop.makeFailedFuture(FluentError.idRequired)
         }
