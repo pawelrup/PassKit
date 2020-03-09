@@ -17,6 +17,7 @@ public protocol PassKitDatabaseFetcher {
     associatedtype ErrorLog: PassKitErrorLog
     
     var logger: Logger { get }
+    var directoryConfiguration: DirectoryConfiguration { get }
     
     var wwdrURL: URL { get }
     var templateURL: URL { get }
@@ -109,13 +110,14 @@ extension PassKitDatabaseFetcher {
     
     func latestVersionOfPass(serialNumber: UUID, ifModifiedSince: TimeInterval, on db: Database, with eventLoop: EventLoop) -> EventLoopFuture<Response> {
         logger.info("latestVersionOfPass: Try return latest version of pass for \(serialNumber), ifModifiedSince \(ifModifiedSince)")
+        let workingDirectoryURL = URL(fileURLWithPath: directoryConfiguration.workingDirectory, isDirectory: true)
         return Pass.for(serialNumber: serialNumber, on: db)
             .flatMap { pass -> EventLoopFuture<Response> in
                 guard ifModifiedSince < pass.modified.timeIntervalSince1970 else {
                     return eventLoop.makeFailedFuture(Abort(.notModified, reason: "latestVersionOfPass: Pass wasn't modified since \(ifModifiedSince). Pass modify date \(pass.modified.timeIntervalSince1970)"))
                 }
                 return eventLoop.future(pass)
-                    .generatePass(certificateURL: self.certificateURL, certificatePassword: self.certificatePassword, wwdrURL: self.wwdrURL, templateURL: self.templateURL)
+                    .generatePass(certificateURL: self.certificateURL, certificatePassword: self.certificatePassword, wwdrURL: self.wwdrURL, templateURL: self.templateURL, destinationURL: workingDirectoryURL)
                     .map { data in
                         let body = Response.Body(data: data)
                         
