@@ -139,6 +139,7 @@ extension PassKitDatabaseFetcher {
     func sendPushNotificationsForPass(id: UUID, type: String, on db: Database, using apns: Application.APNS) throws -> EventLoopFuture<Void> {
         let destinationURL = URL(fileURLWithPath: directoryConfiguration.workingDirectory, isDirectory: true)
             .appendingPathComponent(UUID().uuidString)
+        FileManager.default.createDirectory(at: destinationURL, withIntermediateDirectories: false)
         let pemCertURL = destinationURL.appendingPathComponent("cert.pem")
         let pemKeyURL = destinationURL.appendingPathComponent("key.pem")
         logger.info("certificateURL: \(certificateURL)")
@@ -198,8 +199,7 @@ extension PassKitDatabaseFetcher {
                 .always { _ in
                     self.logger.warning("Change back apns configuration and remove pem key and cert")
                     apns.configuration = oldConfiguration
-                    try? FileManager.default.removeItem(at: pemKeyURL)
-                    try? FileManager.default.removeItem(at: pemCertURL)
+                    try? FileManager.default.removeItem(at: destinationURL)
                 }
         }
     }
