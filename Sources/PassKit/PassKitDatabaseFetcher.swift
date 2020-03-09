@@ -141,10 +141,25 @@ extension PassKitDatabaseFetcher {
             .appendingPathComponent(UUID().uuidString)
         let pemCertURL = destinationURL.appendingPathComponent("cert.pem")
         let pemKeyURL = destinationURL.appendingPathComponent("key.pem")
+        logger.info("certificateURL: \(certificateURL)")
+        logger.info("pemCertURL: \(pemCertURL)")
+        logger.info("pemKeyURL: \(pemKeyURL)")
         var oldConfiguration: APNSwiftConfiguration?
         return db.eventLoop.future()
             .flatMap { PassGenerator.generatePemCertificate(from: self.certificateURL, to: pemCertURL, password: self.certificatePassword, on: db.eventLoop) }
+            .flatMapErrorThrowing { error in
+                if case let PassGeneratorError.cannotGenerateCertificate(terminationStatus) = error {
+                    self.logger.error("Failed generating pem cert with status \(terminationStatus)")
+                }
+                throw error
+            }
             .flatMap { PassGenerator.generatePemKey(from: self.certificateURL, to: pemKeyURL, password: self.certificatePassword, on: db.eventLoop) }
+            .flatMapErrorThrowing { error in
+                if case let PassGeneratorError.cannotGenerateKey(terminationStatus) = error {
+                    self.logger.error("Failed generating pem key with status \(terminationStatus)")
+                }
+                throw error
+            }
             .flatMapThrowing {
                 self.logger.warning("Change apns configuration to passkit certs")
                 oldConfiguration = apns.configuration
