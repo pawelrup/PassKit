@@ -137,7 +137,24 @@ extension PassKitDatabaseFetcher {
     }
     
     func sendPushNotificationsForPass(id: UUID, type: String, on db: Database, using apns: Application.APNS) throws -> EventLoopFuture<Void> {
-        registrationsForPass(id: id, on: db)
+        let destinationURL = URL(fileURLWithPath: directoryConfiguration.workingDirectory, isDirectory: true)
+            .appendingPathComponent(UUID().uuidString)
+        let pemCertURL = destinationURL.appendingPathComponent("cert.pem")
+        let pemKeyURL = destinationURL.appendingPathComponent("key.pem")
+        var oldConfiguration: APNSwiftConfiguration?
+        return db.eventLoop.future()
+            .flatMap { PassGenerator.generatePemCertificate(from: self.certificateURL, to: pemCertURL, password: self.certificatePassword, on: db.eventLoop) }
+            .flatMap { PassGenerator.generatePemKey(from: self.certificateURL, to: pemKeyURL, password: self.certificatePassword, on: db.eventLoop) }
+            .flatMapThrowing {
+                self.logger.warning("Change apns configuration to passkit certs")
+                oldConfiguration = apns.configuration
+                apns.configuration = try APNSwiftConfiguration(
+                    privateKeyPath: pemKeyURL.path,
+                    pemPath: pemCertURL.path,
+                    logger: self.logger,
+                    passphraseCallback: { $0(self.certificatePassword.utf8) })
+            }
+            .flatMap { self.registrationsForPass(id: id, on: db) }
             .flatMap {
                 $0.map { registration in
                     let payload = "{}".data(using: .utf8)!
@@ -163,6 +180,12 @@ extension PassKitDatabaseFetcher {
                     }
                 }
                 .flatten(on: db.eventLoop)
+                .always { _ in
+                    self.logger.warning("Change back apns configuration and remove pem key and cert")
+                    apns.configuration = oldConfiguration
+                    try? FileManager.default.removeItem(at: pemKeyURL)
+                    try? FileManager.default.removeItem(at: pemCertURL)
+                }
         }
     }
 }
