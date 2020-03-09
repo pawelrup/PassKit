@@ -139,7 +139,7 @@ extension PassKitDatabaseFetcher {
     func sendPushNotificationsForPass(id: UUID, type: String, on db: Database, using apns: Application.APNS) throws -> EventLoopFuture<Void> {
         let destinationURL = URL(fileURLWithPath: directoryConfiguration.workingDirectory, isDirectory: true)
             .appendingPathComponent(UUID().uuidString)
-        FileManager.default.createDirectory(at: destinationURL, withIntermediateDirectories: false)
+        try FileManager.default.createDirectory(at: destinationURL, withIntermediateDirectories: false)
         let pemCertURL = destinationURL.appendingPathComponent("cert.pem")
         let pemKeyURL = destinationURL.appendingPathComponent("key.pem")
         logger.info("certificateURL: \(certificateURL)")
