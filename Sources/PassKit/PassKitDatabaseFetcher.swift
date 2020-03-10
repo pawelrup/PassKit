@@ -46,8 +46,8 @@ extension PassKitDatabaseFetcher {
                 
                 registrations.forEach {
                     serialNumbers.append($0.pass.id!.uuidString)
-                    if $0.pass.modified > maxDate {
-                        maxDate = $0.pass.modified
+                    if $0.pass.modified ?? Date.distantPast > maxDate {
+                        maxDate = $0.pass.modified ?? Date.distantPast
                     }
                 }
                 
@@ -113,7 +113,7 @@ extension PassKitDatabaseFetcher {
         let workingDirectoryURL = URL(fileURLWithPath: directoryConfiguration.workingDirectory, isDirectory: true)
         return Pass.for(serialNumber: serialNumber, on: db)
             .flatMap { pass -> EventLoopFuture<Response> in
-                guard ifModifiedSince < pass.modified.timeIntervalSince1970 else {
+                guard ifModifiedSince < (pass.modified ?? Date.distantPast).timeIntervalSince1970 else {
                     return eventLoop.makeFailedFuture(Abort(.notModified, reason: "latestVersionOfPass: Pass wasn't modified since value \"ifModifiedSince\"."))
                 }
                 return eventLoop.future(pass)
@@ -123,7 +123,7 @@ extension PassKitDatabaseFetcher {
                         
                         var headers = HTTPHeaders()
                         headers.add(name: .contentType, value: "application/vnd.apple.pkpass")
-                        headers.add(name: .lastModified, value: String(pass.modified.timeIntervalSince1970))
+                        headers.add(name: .lastModified, value: String((pass.modified ?? Date.distantPast).timeIntervalSince1970))
                         headers.add(name: .contentTransferEncoding, value: "binary")
                         
                         return Response(status: .ok, headers: headers, body: body)

@@ -13,7 +13,7 @@ import PassGenerator
 public protocol PassKitPass: Model, PassConvertible where IDValue == UUID {
     
     /// The last time the pass was modified.
-    var modified: Date { get set }
+    var modified: Date? { get set }
     
     static func `for`(serialNumber: UUID, on db: Database) -> EventLoopFuture<Self>
 }
@@ -28,9 +28,9 @@ internal extension PassKitPass {
         return id
     }
     
-    var _$modified: Field<Date> {
+    var _$modified: Timestamp {
         guard let mirror = Mirror(reflecting: self).descendant("_modified"),
-            let modified = mirror as? Field<Date> else {
+            let modified = mirror as? Timestamp else {
                 fatalError("modified property must be declared using @Field")
         }
         
