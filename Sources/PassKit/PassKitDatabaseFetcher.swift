@@ -180,7 +180,7 @@ extension PassKitDatabaseFetcher {
                             guard case let APNSwiftError.ResponseError.badRequest(response) = $0, response == .badDeviceToken else {
                                 return db.eventLoop.future()
                             }
-                            self.logger.warning("Failed to send push: \(response). Deleting registration.")
+                            self.logger.warning("Failed to send push. Deleting registration.")
                             
                             // Be sure the device deletes before the registration is deleted.
                             // If you let them run in parallel issues might arise depending on
