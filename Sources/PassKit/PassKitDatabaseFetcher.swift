@@ -211,7 +211,6 @@ extension PassKitDatabaseFetcher {
             .with(\._$device)
             .filter(Pass.self, \._$id == id)
             .all()
-            .guard({ !$0.isEmpty }, else: Abort(.notFound, reason: "No registrations found for pass \(id)."))
     }
     
     private static func createRegistration(device: Device, pass: Pass, on db: Database, with eventLoop: EventLoop) -> EventLoopFuture<HTTPStatus> {
