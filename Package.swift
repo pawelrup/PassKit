@@ -1,4 +1,4 @@
-// swift-tools-version:5.1
+// swift-tools-version:5.2
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
@@ -15,7 +15,13 @@ let dependencies: [Package.Dependency] = [
 // Targets are the basic building blocks of a package. A target can define a module or a test suite.
 // Targets can depend on other targets in this package, and on products in packages which this package depends on.
 let targets: [Target] = [
-    .target(name: "PassKit", dependencies: ["Fluent", "Vapor", "APNS", "Logging", "PassGenerator"]),
+    .target(name: "PassKit", dependencies: [
+        .product(name: "Vapor", package: "vapor"),
+        .product(name: "Fluent", package: "fluent"),
+        .product(name: "APNS", package: "apns"),
+        .product(name: "Logging", package: "swift-log"),
+        "PassGenerator"
+    ]),
     .testTarget(name: "PassKitTests", dependencies: ["PassKit"])
 ]
 
