@@ -161,7 +161,9 @@ extension PassKitDatabaseFetcher {
             .flatMapThrowing {
                 self.logger.debug("sendPushNotificationsForPass: Change apns configuration to passkit certs")
                 oldConfiguration = apns.configuration
-                apns.configuration = try APNSwiftConfiguration(authenticationMethod: .tls(privateKeyPath: pemKeyURL.path, pemPath: pemCertURL.path), topic: "", environment: .production, logger: self.logger)
+                let authenticationMethod = try APNSwiftConfiguration.AuthenticationMethod.tls(privateKeyPath: pemKeyURL.path, pemPath: pemCertURL.path, pemPassword: self.certificatePassword.bytes)
+                let apnsConfig = APNSwiftConfiguration(authenticationMethod: authenticationMethod, topic: "", environment: .production, logger: self.logger)
+                apns.configuration = apnsConfig
             }
             .flatMap { self.registrationsForPass(id: id, on: db) }
             .flatMap {
