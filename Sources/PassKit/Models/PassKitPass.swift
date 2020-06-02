@@ -28,9 +28,9 @@ internal extension PassKitPass {
         return id
     }
     
-    var _$modified: Timestamp {
+    var _$modified: Timestamp<ISO8601TimestampFormat> {
         guard let mirror = Mirror(reflecting: self).descendant("_modified"),
-            let modified = mirror as? Timestamp else {
+            let modified = mirror as? Timestamp<ISO8601TimestampFormat> else {
                 fatalError("modified property must be declared using @Field")
         }
         
