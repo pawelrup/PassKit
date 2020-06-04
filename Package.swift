@@ -6,7 +6,7 @@ import PackageDescription
 // Dependencies declare other packages that this package depends on.
 let dependencies: [Package.Dependency] = [
     .package(url: "https://github.com/vapor/vapor.git", from: "4.8.0"),
-    .package(url: "https://github.com/vapor/fluent.git", from: "4.0.0-rc.3"),
+    .package(url: "https://github.com/vapor/fluent.git", from: "4.0.0-rc.3.1"),
     .package(url: "https://github.com/vapor/apns.git", from: "1.0.0-rc.1.1"),
     .package(url: "https://github.com/apple/swift-log.git", from: "1.2.0"),
     .package(url: "https://github.com/pawelrup/PassGenerator.git", .exact("0.9.1"))
