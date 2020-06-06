@@ -27,6 +27,11 @@ public protocol PassKitDatabaseFetcher {
 
 extension PassKitDatabaseFetcher {
     
+    private func fileExists(at path: String, isDirectory: Bool = false) -> Bool {
+        var isDirectory: ObjCBool = ObjCBool(isDirectory)
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+    }
+    
     func registrations(forDeviceLibraryIdentifier deviceLibraryIdentifier: String, passesUpdatedSince: TimeInterval?, on db: Database) -> EventLoopFuture<PassesForDeviceDto> {
         var query = Registration.for(deviceLibraryIdentifier: deviceLibraryIdentifier, on: db)
         
@@ -111,6 +116,22 @@ extension PassKitDatabaseFetcher {
     func latestVersionOfPass(serialNumber: UUID, ifModifiedSince: TimeInterval, on db: Database, with eventLoop: EventLoop) -> EventLoopFuture<Response> {
         logger.debug("latestVersionOfPass: Try return latest version of pass.")
         let workingDirectoryURL = URL(fileURLWithPath: directoryConfiguration.workingDirectory, isDirectory: true)
+        guard fileExists(at: workingDirectoryURL.path, isDirectory: true) else {
+            logger.error("latestVersionOfPass: Working directory does not exist.")
+            return eventLoop.makeFailedFuture(Abort(.notFound, reason: "Working directory does not exist."))
+        }
+        guard fileExists(at: certificateURL.path) else {
+            logger.error("latestVersionOfPass: Certificate does not exist at path \(certificateURL.path)")
+            return eventLoop.makeFailedFuture(Abort(.notFound, reason: "Certificate does not exist."))
+        }
+        guard fileExists(at: wwdrURL.path) else {
+            logger.error("latestVersionOfPass: WWDR does not exist at path \(wwdrURL.path)")
+            return eventLoop.makeFailedFuture(Abort(.notFound, reason: "WWDR does not exist."))
+        }
+        guard fileExists(at: templateURL.path) else {
+            logger.error("latestVersionOfPass: Template does not exist at path \(templateURL.path)")
+            return eventLoop.makeFailedFuture(Abort(.notFound, reason: "Template does not exist."))
+        }
         return Pass.for(serialNumber: serialNumber, on: db)
             .flatMap { pass -> EventLoopFuture<Response> in
                 guard ifModifiedSince < (pass.modified ?? Date.distantPast).timeIntervalSince1970 else {
