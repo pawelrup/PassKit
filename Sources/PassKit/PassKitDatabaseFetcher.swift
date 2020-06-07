@@ -134,12 +134,16 @@ extension PassKitDatabaseFetcher {
         }
         return Pass.for(serialNumber: serialNumber, on: db)
             .flatMap { pass -> EventLoopFuture<Response> in
+                self.logger.debug("✅ latestVersionOfPass: Successfully loaded latest version of pass from db")
                 guard ifModifiedSince < (pass.modified ?? Date.distantPast).timeIntervalSince1970 else {
+                    self.logger.warning("❗️ latestVersionOfPass: Pass wasn't modified since value \"ifModifiedSince\".")
                     return eventLoop.makeFailedFuture(Abort(.notModified, reason: "latestVersionOfPass: Pass wasn't modified since value \"ifModifiedSince\"."))
                 }
+                self.logger.debug("❓ latestVersionOfPass: Try generate pass…")
                 return eventLoop.future(pass)
                     .generatePass(certificateURL: self.certificateURL, certificatePassword: self.certificatePassword, wwdrURL: self.wwdrURL, templateURL: self.templateURL, destinationURL: workingDirectoryURL, logger: self.logger)
                     .map { data in
+                        self.logger.debug("✅ latestVersionOfPass: Successfully generated pass")
                         let body = Response.Body(data: data)
                         
                         var headers = HTTPHeaders()
