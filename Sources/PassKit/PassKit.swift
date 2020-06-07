@@ -83,7 +83,7 @@ public extension Application.PassKit {
 extension Application.PassKit {
     
     func passesForDevice(_ req: Request) throws -> EventLoopFuture<PassesForDeviceDto> {
-        application.logger.info("Called passesForDevice")
+        application.logger.info("[ PassKit ] 👨‍🔧 Called passesForDevice")
         
         guard let deviceLibraryIdentifier = req.parameters.get("deviceLibraryIdentifier"),
             let passTypeIdentifier = req.parameters.get("passTypeIdentifier") else {
@@ -96,7 +96,7 @@ extension Application.PassKit {
     }
     
     func logError(_ req: Request) throws -> EventLoopFuture<HTTPStatus> {
-        application.logger.info("Called logError")
+        application.logger.info("[ PassKit ] 👨‍🔧 Called logError")
         
         let body: ErrorLogDto
         
@@ -132,7 +132,7 @@ extension Application.PassKit {
     }
     
     func registerDevice(_ req: Request) throws -> EventLoopFuture<HTTPStatus> {
-        application.logger.info("Called registerDevice")
+        application.logger.info("[ PassKit ] 👨‍🔧 Called registerDevice")
         
         guard let deviceLibraryIdentifier = req.parameters.get("deviceLibraryIdentifier"),
             let passTypeIdentifier = req.parameters.get("passTypeIdentifier"),
@@ -153,7 +153,7 @@ extension Application.PassKit {
     }
     
     func latestVersionOfPass(_ req: Request) throws -> EventLoopFuture<Response> {
-        application.logger.info("Called latestVersionOfPass")
+        application.logger.info("[ PassKit ] 👨‍🔧 Called latestVersionOfPass")
         let ifModifiedSince = req.headers[.ifModifiedSince].first.flatMap({ TimeInterval($0) }) ?? 0
         guard let passTypeIdentifier = req.parameters.get("passTypeIdentifier"),
             let serialNumber = req.parameters.get("serialNumber", as: UUID.self) else {
@@ -164,7 +164,7 @@ extension Application.PassKit {
     }
     
     func unregisterDevice(_ req: Request) throws -> EventLoopFuture<HTTPStatus> {
-        application.logger.info("Called unregisterDevice")
+        application.logger.info("[ PassKit ] 👨‍🔧 Called unregisterDevice")
         
         guard let deviceLibraryIdentifier = req.parameters.get("deviceLibraryIdentifier"),
             let passTypeIdentifier = req.parameters.get("passTypeIdentifier"),
@@ -177,7 +177,7 @@ extension Application.PassKit {
     }
     
     func pushUpdatesForPass(_ req: Request) throws -> EventLoopFuture<HTTPStatus> {
-        application.logger.info("Called pushUpdatesForPass")
+        application.logger.info("[ PassKit ] 👨‍🔧 Called pushUpdatesForPass")
         
         guard let passTypeIdentifier = req.parameters.get("passTypeIdentifier"),
             let serialNumber = req.parameters.get("serialNumber", as: UUID.self) else {
@@ -189,7 +189,7 @@ extension Application.PassKit {
     }
     
     func tokensForPassUpdate(_ req: Request) throws -> EventLoopFuture<[String]> {
-        application.logger.info("Called tokensForPassUpdate")
+        application.logger.info("[ PassKit ] 👨‍🔧 Called tokensForPassUpdate")
         
         guard let passTypeIdentifier = req.parameters.get("passTypeIdentifier"),
             let serialNumber = req.parameters.get("serialNumber", as: UUID.self) else {
@@ -205,14 +205,14 @@ extension Application.PassKit {
 extension Application.PassKit {
     
     public func sendPushNotificationsForPass(id: UUID, of type: String, on db: Database) throws -> EventLoopFuture<Void> {
-        application.logger.info("Called sendPushNotificationsForPass")
+        application.logger.info("[ PassKit ] 👨‍🔧 Called sendPushNotificationsForPass")
         
         return try fetchers.get(for: type)
             .sendPushNotificationsForPass(id: id, type: type, on: db, using: application.apns)
     }
     
     public func sendPushNotifications<Pass: PassKitPass>(for pass: Pass, of type: String, on db: Database) throws -> EventLoopFuture<Void> {
-        application.logger.info("Called sendPushNotifications")
+        application.logger.info("[ PassKit ] 👨‍🔧 Called sendPushNotifications")
         guard let id = pass.id else {
             return db.eventLoop.makeFailedFuture(FluentError.idRequired)
         }

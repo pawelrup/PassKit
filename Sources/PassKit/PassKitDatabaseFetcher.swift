@@ -83,7 +83,7 @@ extension PassKitDatabaseFetcher {
         Pass.query(on: db)
             .filter(\._$id == serialNumber)
             .first()
-            .unwrap(or: Abort(.notFound, reason: "registerDevice: Pass with given serial number not found."))
+            .unwrap(or: Abort(.notFound, reason: "[ PassKitDatabaseFetcher ] 👨‍🔧 registerDevice: Pass with given serial number not found."))
             .flatMap { pass in
                 Device.query(on: db)
                     .filter(\._$deviceLibraryIdentifier == deviceLibraryIdentifier)
@@ -91,10 +91,10 @@ extension PassKitDatabaseFetcher {
                     .first()
                     .flatMap { device in
                         if let device = device {
-                            self.logger.debug("registerDevice: Device exists, creating new registration")
+                            self.logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 registerDevice: Device exists, creating new registration")
                             return Self.createRegistration(device: device, pass: pass, on: db, with: eventLoop)
                         } else {
-                            self.logger.debug("registerDevice: Creating new device and registration")
+                            self.logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 registerDevice: Creating new device and registration")
                             let newDevice = Device(deviceLibraryIdentifier: deviceLibraryIdentifier, pushToken: pushToken)
                             
                             return newDevice
@@ -114,36 +114,36 @@ extension PassKitDatabaseFetcher {
     }
     
     func latestVersionOfPass(serialNumber: UUID, ifModifiedSince: TimeInterval, on db: Database, with eventLoop: EventLoop) -> EventLoopFuture<Response> {
-        logger.debug("latestVersionOfPass: Try return latest version of pass.")
+        logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: Try return latest version of pass.")
         let workingDirectoryURL = URL(fileURLWithPath: directoryConfiguration.workingDirectory, isDirectory: true)
         guard fileExists(at: workingDirectoryURL.path, isDirectory: true) else {
-            logger.error("latestVersionOfPass: Working directory does not exist.")
+            logger.error("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: Working directory does not exist.")
             return eventLoop.makeFailedFuture(Abort(.notFound, reason: "Working directory does not exist."))
         }
         guard fileExists(at: certificateURL.path) else {
-            logger.error("latestVersionOfPass: Certificate does not exist at path \(certificateURL.path)")
+            logger.error("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: Certificate does not exist at path \(certificateURL.path)")
             return eventLoop.makeFailedFuture(Abort(.notFound, reason: "Certificate does not exist."))
         }
         guard fileExists(at: wwdrURL.path) else {
-            logger.error("latestVersionOfPass: WWDR does not exist at path \(wwdrURL.path)")
+            logger.error("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: WWDR does not exist at path \(wwdrURL.path)")
             return eventLoop.makeFailedFuture(Abort(.notFound, reason: "WWDR does not exist."))
         }
         guard fileExists(at: templateURL.path) else {
-            logger.error("latestVersionOfPass: Template does not exist at path \(templateURL.path)")
+            logger.error("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: Template does not exist at path \(templateURL.path)")
             return eventLoop.makeFailedFuture(Abort(.notFound, reason: "Template does not exist."))
         }
         return Pass.for(serialNumber: serialNumber, on: db)
             .flatMap { pass -> EventLoopFuture<Response> in
-                self.logger.debug("✅ latestVersionOfPass: Successfully loaded latest version of pass from db")
+                self.logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: Successfully loaded latest version of pass from db")
                 guard ifModifiedSince < (pass.modified ?? Date.distantPast).timeIntervalSince1970 else {
-                    self.logger.warning("❗️ latestVersionOfPass: Pass wasn't modified since value \"ifModifiedSince\".")
+                    self.logger.warning("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: Pass wasn't modified since value \"ifModifiedSince\".")
                     return eventLoop.makeFailedFuture(Abort(.notModified, reason: "latestVersionOfPass: Pass wasn't modified since value \"ifModifiedSince\"."))
                 }
-                self.logger.debug("❓ latestVersionOfPass: Try generate pass…")
+                self.logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: Try generate pass…")
                 return eventLoop.future(pass)
                     .generatePass(certificateURL: self.certificateURL, certificatePassword: self.certificatePassword, wwdrURL: self.wwdrURL, templateURL: self.templateURL, destinationURL: workingDirectoryURL, logger: self.logger)
                     .map { data in
-                        self.logger.debug("✅ latestVersionOfPass: Successfully generated pass")
+                        self.logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: Successfully generated pass")
                         let body = Response.Body(data: data)
                         
                         var headers = HTTPHeaders()
@@ -172,19 +172,19 @@ extension PassKitDatabaseFetcher {
             .flatMap { PassGenerator.generatePemCertificate(from: self.certificateURL, to: pemCertURL, password: self.certificatePassword, on: db.eventLoop) }
             .flatMapErrorThrowing { error in
                 if case let PassGeneratorError.cannotGenerateCertificate(terminationStatus) = error {
-                    self.logger.error("Failed generating pem cert with termination status: \(terminationStatus)")
+                    self.logger.error("[ PassKitDatabaseFetcher ] 👨‍🔧 Failed generating pem cert with termination status: \(terminationStatus)")
                 }
                 throw error
             }
             .flatMap { PassGenerator.generatePemKey(from: self.certificateURL, to: pemKeyURL, password: self.certificatePassword, on: db.eventLoop) }
             .flatMapErrorThrowing { error in
                 if case let PassGeneratorError.cannotGenerateKey(terminationStatus) = error {
-                    self.logger.error("Failed generating pem key with termination status: \(terminationStatus)")
+                    self.logger.error("[ PassKitDatabaseFetcher ] 👨‍🔧 Failed generating pem key with termination status: \(terminationStatus)")
                 }
                 throw error
             }
             .flatMapThrowing {
-                self.logger.debug("sendPushNotificationsForPass: Change apns configuration to passkit certs")
+                self.logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 sendPushNotificationsForPass: Change apns configuration to passkit certs")
                 oldConfiguration = apns.configuration
                 let authenticationMethod = try APNSwiftConfiguration.AuthenticationMethod.tls(privateKeyPath: pemKeyURL.path, pemPath: pemCertURL.path, pemPassword: self.certificatePassword.bytes)
                 let apnsConfig = APNSwiftConfiguration(authenticationMethod: authenticationMethod, topic: "", environment: .production, logger: self.logger)
@@ -203,7 +203,7 @@ extension PassKitDatabaseFetcher {
                             guard case let APNSwiftError.ResponseError.badRequest(response) = $0, response == .badDeviceToken else {
                                 return db.eventLoop.future()
                             }
-                            self.logger.warning("Failed to send push. Deleting registration.")
+                            self.logger.warning("[ PassKitDatabaseFetcher ] 👨‍🔧 Failed to send push. Deleting registration.")
                             
                             // Be sure the device deletes before the registration is deleted.
                             // If you let them run in parallel issues might arise depending on
@@ -216,7 +216,7 @@ extension PassKitDatabaseFetcher {
                 }
                 .flatten(on: db.eventLoop)
                 .always { _ in
-                    self.logger.debug("sendPushNotificationsForPass: Change back apns configuration and remove pem key and cert")
+                    self.logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 sendPushNotificationsForPass: Change back apns configuration and remove pem key and cert")
                     apns.configuration = oldConfiguration
                     try? FileManager.default.removeItem(at: destinationURL)
                 }
