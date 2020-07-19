@@ -5,11 +5,11 @@ import PackageDescription
 
 // Dependencies declare other packages that this package depends on.
 let dependencies: [Package.Dependency] = [
-    .package(url: "https://github.com/vapor/vapor.git", from: "4.14.0"),
-    .package(url: "https://github.com/vapor/fluent.git", from: "4.0.0"),
-    .package(url: "https://github.com/vapor/apns.git", from: "1.0.0-rc.1.1"),
-    .package(url: "https://github.com/apple/swift-log.git", from: "1.2.0"),
-    .package(url: "https://github.com/pawelrup/PassGenerator.git", .exact("0.12.0"))
+	.package(url: "https://github.com/vapor/vapor.git", .upToNextMinor(from: "4.25.0")),
+    .package(url: "https://github.com/vapor/fluent.git", .upToNextMinor(from: "4.0.0")),
+    .package(url: "https://github.com/vapor/apns.git", .upToNextMinor(from: "1.0.0-rc.1.1")),
+    .package(url: "https://github.com/apple/swift-log.git", .upToNextMinor(from: "1.4.0")),
+	.package(url: "https://github.com/pawelrup/PassGenerator.git", .upToNextMinor(from: "0.12.2"))
 ]
 
 // Targets are the basic building blocks of a package. A target can define a module or a test suite.
@@ -20,7 +20,7 @@ let targets: [Target] = [
         .product(name: "Fluent", package: "fluent"),
         .product(name: "APNS", package: "apns"),
         .product(name: "Logging", package: "swift-log"),
-        "PassGenerator"
+		.product(name: "PassGenerator", package: "PassGenerator")
     ]),
     .testTarget(name: "PassKitTests", dependencies: ["PassKit"])
 ]
@@ -30,4 +30,11 @@ let products: [Product] = [
     .library(name: "PassKit", targets: ["PassKit"])
 ]
 
-let package = Package(name: "PassKit", platforms: [.macOS(.v10_15)], products: products, dependencies: dependencies, targets: targets)
+let package = Package(
+	name: "PassKit",
+	platforms: [.macOS(.v10_15)],
+	products: products,
+	dependencies: dependencies,
+	targets: targets,
+	swiftLanguageVersions: [.v5]
+)
