@@ -5,7 +5,7 @@ import PackageDescription
 
 // Dependencies declare other packages that this package depends on.
 let dependencies: [Package.Dependency] = [
-	.package(url: "https://github.com/vapor/vapor.git", .upToNextMinor(from: "4.27.1")),
+	.package(url: "https://github.com/vapor/vapor.git", .upToNextMinor(from: "4.28.0")),
     .package(url: "https://github.com/vapor/fluent.git", .upToNextMinor(from: "4.0.0")),
     .package(url: "https://github.com/vapor/apns.git", .upToNextMinor(from: "1.0.0-rc.1.1")),
     .package(url: "https://github.com/apple/swift-log.git", .upToNextMinor(from: "1.4.0")),
