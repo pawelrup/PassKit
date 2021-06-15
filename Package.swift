@@ -9,7 +9,7 @@ let dependencies: [Package.Dependency] = [
 	.package(url: "https://github.com/vapor/fluent.git", .upToNextMinor(from: "4.3.1")),
 	.package(url: "https://github.com/vapor/apns.git", .upToNextMinor(from: "2.1.0")),
     .package(url: "https://github.com/apple/swift-log.git", .upToNextMinor(from: "1.4.2")),
-	.package(url: "https://github.com/pawelrup/PassGenerator.git", .upToNextMinor(from: "0.14.4"))
+	.package(url: "https://github.com/pawelrup/PassGenerator.git", .upToNextMinor(from: "0.14.5"))
 ]
 
 // Targets are the basic building blocks of a package. A target can define a module or a test suite.
