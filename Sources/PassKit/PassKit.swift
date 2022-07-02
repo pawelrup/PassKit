@@ -1,30 +1,41 @@
-//
-//  PassKit.swift
-//
-//
-//  Created by Pawel Rup on 20/02/2020.
-//
-
 import Vapor
 import Fluent
 import APNS
 
 public struct PassKitConfiguration {
     let pushAuthMiddleware: Middleware?
-    let fetchers: [String: AnyDatabaseFetcher]
+    let fetchers: [String: any PassKitDatabaseFetcher]
     
-    public init(pushAuthMiddleware: Middleware? = nil, fetchers: [String: AnyDatabaseFetcher]) {
+    public init(pushAuthMiddleware: Middleware? = nil, fetchers: [String: any PassKitDatabaseFetcher]) {
         self.pushAuthMiddleware = pushAuthMiddleware
         self.fetchers = fetchers
     }
 }
 
+extension Dictionary where Value == any PassKitDatabaseFetcher {
+    func get(for key: Key) throws -> Value {
+        guard let value = self[key] else {
+            throw Abort(.notFound)
+        }
+        return value
+    }
+}
+
+public protocol PassKitType {
+    var configuration: PassKitConfiguration? { get nonmutating set }
+    var fetchers: [String: any PassKitDatabaseFetcher] { get }
+    var logger: Logger { get }
+    var apns: Application.APNS { get }
+    
+    func registerRoutes(_ routes: RoutesBuilder, authorizationCode: String?)
+}
+
 extension Application {
-    public var passKit: PassKit {
-        .init(application: self)
+    public var passKit: PassKitType {
+        PassKit(application: self)
     }
     
-    public struct PassKit {
+    public struct PassKit: PassKitType {
         struct ConfigurationKey: StorageKey {
             typealias Value = PassKitConfiguration
         }
@@ -32,17 +43,23 @@ extension Application {
 
         public var configuration: PassKitConfiguration? {
             get {
-                self.application.storage[ConfigurationKey.self]
+                application.storage[ConfigurationKey.self]
             }
             nonmutating set {
-                self.application.storage[ConfigurationKey.self] = newValue
+                application.storage[ConfigurationKey.self] = newValue
             }
         }
-        var fetchers: [String: AnyDatabaseFetcher] {
+        public var fetchers: [String: any PassKitDatabaseFetcher] {
             guard let configuration = self.configuration else {
                 fatalError("PassKit not configured. Use app.passKit.configuration = ...")
             }
             return configuration.fetchers
+        }
+        public var logger: Logger {
+            application.logger
+        }
+        public var apns: Application.APNS {
+            application.apns
         }
         
         public init(application: Application) {
@@ -52,8 +69,7 @@ extension Application {
 }
 
 // MARK: - Public functions
-public extension Application.PassKit {
-    
+public extension PassKitType {
     func registerRoutes(_ routes: RoutesBuilder, authorizationCode: String? = nil) {
         let v1 = routes.grouped("v1")
         v1.get("devices", ":deviceLibraryIdentifier", "registrations", ":passTypeIdentifier", use: passesForDevice)
@@ -80,24 +96,21 @@ public extension Application.PassKit {
 }
 
 // MARK: - Api routes
-extension Application.PassKit {
+extension PassKitType {
     
-    func passesForDevice(_ req: Request) throws -> EventLoopFuture<PassesForDeviceDto> {
-        application.logger.info("[ PassKit ] 👨‍🔧 Called passesForDevice")
-        
+    func passesForDevice(_ req: Request) async throws -> PassesForDeviceDto {
+        logger.info("[ PassKit ] 👨‍🔧 Called passesForDevice")
         guard let deviceLibraryIdentifier = req.parameters.get("deviceLibraryIdentifier"),
             let passTypeIdentifier = req.parameters.get("passTypeIdentifier") else {
                 throw Abort(.badRequest)
         }
         let passesUpdatedSince = req.parameters.get("passesUpdatedSince", as: TimeInterval.self)
-        
-        return try fetchers.get(for: passTypeIdentifier)
+        return try await fetchers.get(for: passTypeIdentifier)
             .registrations(forDeviceLibraryIdentifier: deviceLibraryIdentifier, passesUpdatedSince: passesUpdatedSince, on: req.db)
     }
     
-    func logError(_ req: Request) throws -> EventLoopFuture<HTTPStatus> {
-        application.logger.info("[ PassKit ] 👨‍🔧 Called logError")
-        
+    func logError(_ req: Request) async throws -> HTTPStatus {
+        logger.info("[ PassKit ] 👨‍🔧 Called logError")
         let body: ErrorLogDto
         
         do {
@@ -109,30 +122,29 @@ extension Application.PassKit {
         guard body.logs.isEmpty == false else {
             throw Abort(.badRequest)
         }
-        
-        return req.eventLoop.future()
-            .map { self.fetchers.first?.value }
-            .unwrap(or: Abort(.notFound, reason: "Fetcher not found. Weird…"))
-            .flatMap { $0.saveLogs(body.logs, on: req.db) }
-            .map { .ok }
+        guard let fetcher = fetchers.first?.value else {
+            throw Abort(.notFound, reason: "Fetcher not found. Weird…")
+        }
+        try await fetcher.saveLogs(body.logs, on: req.db)
+        return .ok
     }
     
-    func getAllErrors(_ req: Request) throws -> EventLoopFuture<[String]> {
-        return req.eventLoop.future()
-            .map { self.fetchers.first?.value }
-            .unwrap(or: Abort(.notFound, reason: "Detcher not found. Weird…"))
-            .flatMap { $0.getAllLogs(on: req.db) }
+    func getAllErrors(_ req: Request) async throws -> [String] {
+        guard let fetcher = fetchers.first?.value else {
+            throw Abort(.notFound, reason: "Fetcher not found. Weird…")
+        }
+        return try await fetcher.getAllLogs(on: req.db)
     }
     
-    func deleteAllErrors(_ req: Request) throws -> EventLoopFuture<HTTPStatus> {
-        return req.eventLoop.future()
-            .map { self.fetchers.first?.value }
-            .unwrap(or: Abort(.notFound, reason: "Detcher not found. Weird…"))
-            .flatMap { $0.deleteAllLogs(on: req.db, with: req.eventLoop) }
+    func deleteAllErrors(_ req: Request) async throws -> HTTPStatus {
+        guard let fetcher = fetchers.first?.value else {
+            throw Abort(.notFound, reason: "Fetcher not found. Weird…")
+        }
+        return try await fetcher.deleteAllLogs(on: req.db)
     }
     
-    func registerDevice(_ req: Request) throws -> EventLoopFuture<HTTPStatus> {
-        application.logger.info("[ PassKit ] 👨‍🔧 Called registerDevice")
+    func registerDevice(_ req: Request) async throws -> HTTPStatus {
+        logger.info("[ PassKit ] 👨‍🔧 Called registerDevice")
         
         guard let deviceLibraryIdentifier = req.parameters.get("deviceLibraryIdentifier"),
             let passTypeIdentifier = req.parameters.get("passTypeIdentifier"),
@@ -148,23 +160,23 @@ extension Application.PassKit {
             throw Abort(.badRequest)
         }
         
-        return try fetchers.get(for: passTypeIdentifier)
-            .registerDevice(deviceLibraryIdentifier: deviceLibraryIdentifier, serialNumber: serialNumber, pushToken: pushToken, on: req.db, with: req.eventLoop)
+        return try await fetchers.get(for: passTypeIdentifier)
+            .registerDevice(deviceLibraryIdentifier: deviceLibraryIdentifier, serialNumber: serialNumber, pushToken: pushToken, on: req.db)
     }
     
-    func latestVersionOfPass(_ req: Request) throws -> EventLoopFuture<Response> {
-        application.logger.info("[ PassKit ] 👨‍🔧 Called latestVersionOfPass")
+    func latestVersionOfPass(_ req: Request) async throws -> Response {
+        logger.info("[ PassKit ] 👨‍🔧 Called latestVersionOfPass")
         let ifModifiedSince = req.headers[.ifModifiedSince].first.flatMap({ TimeInterval($0) }) ?? 0
         guard let passTypeIdentifier = req.parameters.get("passTypeIdentifier"),
             let serialNumber = req.parameters.get("serialNumber", as: UUID.self) else {
                 throw Abort(.badRequest)
         }
-        return try fetchers.get(for: passTypeIdentifier)
-            .latestVersionOfPass(serialNumber: serialNumber, ifModifiedSince: ifModifiedSince, on: req.db, with: req.eventLoop)
+        return try await fetchers.get(for: passTypeIdentifier)
+            .latestVersionOfPass(serialNumber: serialNumber, ifModifiedSince: ifModifiedSince, on: req.db)
     }
     
-    func unregisterDevice(_ req: Request) throws -> EventLoopFuture<HTTPStatus> {
-        application.logger.info("[ PassKit ] 👨‍🔧 Called unregisterDevice")
+    func unregisterDevice(_ req: Request) async throws -> HTTPStatus {
+        logger.info("[ PassKit ] 👨‍🔧 Called unregisterDevice")
         
         guard let deviceLibraryIdentifier = req.parameters.get("deviceLibraryIdentifier"),
             let passTypeIdentifier = req.parameters.get("passTypeIdentifier"),
@@ -172,50 +184,50 @@ extension Application.PassKit {
                 throw Abort(.badRequest)
         }
         
-        return try fetchers.get(for: passTypeIdentifier)
+        return try await fetchers.get(for: passTypeIdentifier)
             .unregisterDevice(deviceLibraryIdentifier: deviceLibraryIdentifier, serialNumber: serialNumber, on: req.db)
     }
     
-    func pushUpdatesForPass(_ req: Request) throws -> EventLoopFuture<HTTPStatus> {
-        application.logger.info("[ PassKit ] 👨‍🔧 Called pushUpdatesForPass")
+    func pushUpdatesForPass(_ req: Request) async throws -> HTTPStatus {
+        logger.info("[ PassKit ] 👨‍🔧 Called pushUpdatesForPass")
         
         guard let passTypeIdentifier = req.parameters.get("passTypeIdentifier"),
             let serialNumber = req.parameters.get("serialNumber", as: UUID.self) else {
                 throw Abort(.badRequest)
         }
         
-        return try sendPushNotificationsForPass(id: serialNumber, of: passTypeIdentifier, on: req.db)
-            .map { _ in .noContent }
+        try await sendPushNotificationsForPass(id: serialNumber, of: passTypeIdentifier, on: req.db)
+        return .noContent
     }
     
-    func tokensForPassUpdate(_ req: Request) throws -> EventLoopFuture<[String]> {
-        application.logger.info("[ PassKit ] 👨‍🔧 Called tokensForPassUpdate")
+    func tokensForPassUpdate(_ req: Request) async throws -> [String] {
+        logger.info("[ PassKit ] 👨‍🔧 Called tokensForPassUpdate")
         
         guard let passTypeIdentifier = req.parameters.get("passTypeIdentifier"),
             let serialNumber = req.parameters.get("serialNumber", as: UUID.self) else {
                 throw Abort(.badRequest)
         }
         
-        return try fetchers.get(for: passTypeIdentifier)
+        return try await fetchers.get(for: passTypeIdentifier)
             .tokensForPass(id: serialNumber, on: req.db)
     }
 }
 
 // MARK: - Push Notifications
-extension Application.PassKit {
+extension PassKitType {
     
-    public func sendPushNotificationsForPass(id: UUID, of type: String, on db: Database) throws -> EventLoopFuture<Void> {
-        application.logger.info("[ PassKit ] 👨‍🔧 Called sendPushNotificationsForPass")
+    public func sendPushNotificationsForPass(id: UUID, of type: String, on db: Database) async throws {
+        logger.info("[ PassKit ] 👨‍🔧 Called sendPushNotificationsForPass")
         
-        return try fetchers.get(for: type)
-            .sendPushNotificationsForPass(id: id, type: type, on: db, using: application.apns)
+        return try await fetchers.get(for: type)
+            .sendPushNotificationsForPass(id: id, type: type, on: db, using: apns)
     }
     
-    public func sendPushNotifications<Pass: PassKitPass>(for pass: Pass, of type: String, on db: Database) throws -> EventLoopFuture<Void> {
-        application.logger.info("[ PassKit ] 👨‍🔧 Called sendPushNotifications")
+    public func sendPushNotifications<Pass: PassKitPass>(for pass: Pass, of type: String, on db: Database) async throws {
+        logger.info("[ PassKit ] 👨‍🔧 Called sendPushNotifications")
         guard let id = pass.id else {
-            return db.eventLoop.makeFailedFuture(FluentError.idRequired)
+            throw FluentError.idRequired
         }
-        return try sendPushNotificationsForPass(id: id, of: type, on: db)
+        return try await sendPushNotificationsForPass(id: id, of: type, on: db)
     }
 }

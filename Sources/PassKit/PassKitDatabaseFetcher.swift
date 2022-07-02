@@ -1,10 +1,3 @@
-//
-//  PassKitDatabaseFetcher.swift
-//  
-//
-//  Created by Pawel Rup on 27/02/2020.
-//
-
 import Vapor
 import Fluent
 import APNS
@@ -23,16 +16,26 @@ public protocol PassKitDatabaseFetcher {
     var templateURL: URL { get }
     var certificateURL: URL { get }
     var certificatePassword: String { get }
+    
+    func registrations(forDeviceLibraryIdentifier deviceLibraryIdentifier: String, passesUpdatedSince: TimeInterval?, on db: Database) async throws -> PassesForDeviceDto
+    func saveLogs(_ logs: [String], on db: Database) async throws
+    func getAllLogs(on db: Database) async throws -> [String]
+    func deleteAllLogs(on db: Database) async throws -> HTTPStatus
+    func registerDevice(deviceLibraryIdentifier: String, serialNumber: UUID, pushToken: String, on db: Database) async throws -> HTTPStatus
+    func unregisterDevice(deviceLibraryIdentifier: String, serialNumber: UUID, on db: Database) async throws -> HTTPStatus
+    func latestVersionOfPass(serialNumber: UUID, ifModifiedSince: TimeInterval, on db: Database) async throws -> Response
+    func tokensForPass(id: UUID, on db: Database) async throws -> [String]
+    func sendPushNotificationsForPass(id: UUID, type: String, on db: Database, using apns: Application.APNS) async throws
 }
 
-extension PassKitDatabaseFetcher {
+public extension PassKitDatabaseFetcher {
     
     private func fileExists(at path: String, isDirectory: Bool = false) -> Bool {
-        var isDirectory: ObjCBool = ObjCBool(isDirectory)
+        var isDirectory = ObjCBool(isDirectory)
         return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
     }
     
-    func registrations(forDeviceLibraryIdentifier deviceLibraryIdentifier: String, passesUpdatedSince: TimeInterval?, on db: Database) -> EventLoopFuture<PassesForDeviceDto> {
+    func registrations(forDeviceLibraryIdentifier deviceLibraryIdentifier: String, passesUpdatedSince: TimeInterval?, on db: Database) async throws -> PassesForDeviceDto {
         var query = Registration.for(deviceLibraryIdentifier: deviceLibraryIdentifier, on: db)
         
         if let since = passesUpdatedSince {
@@ -40,194 +43,232 @@ extension PassKitDatabaseFetcher {
             query = query.filter(Pass.self, \._$modified > when)
         }
         
-        return query.all()
-            .flatMapThrowing { registrations in
-                guard !registrations.isEmpty else {
-                    throw Abort(.noContent)
-                }
-                
-                var serialNumbers: [String] = []
-                var maxDate = Date.distantPast
-                
-                registrations.forEach {
-                    serialNumbers.append($0.pass.id!.uuidString)
-                    if $0.pass.modified ?? Date.distantPast > maxDate {
-                        maxDate = $0.pass.modified ?? Date.distantPast
-                    }
-                }
-                
-                return PassesForDeviceDto(with: serialNumbers, maxDate: maxDate)
+        let registrations: [Registration] = try await query.all()
+        guard !registrations.isEmpty else {
+            throw Abort(.noContent)
+        }
+        
+        var serialNumbers: [String] = []
+        var maxDate = Date.distantPast
+        
+        registrations.forEach {
+            serialNumbers.append($0.pass.id!.uuidString)
+            if $0.pass.modified ?? Date.distantPast > maxDate {
+                maxDate = $0.pass.modified ?? Date.distantPast
             }
+        }
+        
+        return PassesForDeviceDto(with: serialNumbers, maxDate: maxDate)
     }
     
-    func saveLogs(_ logs: [String], on db: Database) -> EventLoopFuture<Void> {
-        return logs
-            .map { ErrorLog(message: $0).create(on: db) }
-            .flatten(on: db.eventLoop)
+    func saveLogs(_ logs: [String], on db: Database) async throws {
+        let errors = logs.map(ErrorLog.init)
+        try await errors.create(on: db)
     }
     
-    func getAllLogs(on db: Database) -> EventLoopFuture<[String]> {
-        return ErrorLog.query(on: db)
-            .all()
-            .mapEach { $0.message }
+    func getAllLogs(on db: Database) async throws -> [String] {
+        try await ErrorLog.query(on: db).all().map(\.message)
     }
     
-    func deleteAllLogs(on db: Database, with eventLoop: EventLoop) -> EventLoopFuture<HTTPStatus> {
-        return ErrorLog.query(on: db)
-            .all()
-            .flatMapEach(on: eventLoop, { $0.delete(on: db) })
-            .transform(to: .noContent)
+    func deleteAllLogs(on db: Database) async throws -> HTTPStatus {
+        let logs = try await ErrorLog.query(on: db).all()
+        for log in logs {
+            try await log.delete(on: db)
+        }
+        return .noContent
     }
     
-    func registerDevice(deviceLibraryIdentifier: String, serialNumber: UUID, pushToken: String, on db: Database, with eventLoop: EventLoop) throws -> EventLoopFuture<HTTPStatus> {
-        Pass.query(on: db)
+    func registerDevice(deviceLibraryIdentifier: String, serialNumber: UUID, pushToken: String, on db: Database) async throws -> HTTPStatus {
+        let pass = try await Pass.query(on: db)
             .filter(\._$id == serialNumber)
             .first()
-            .unwrap(or: Abort(.notFound, reason: "[ PassKitDatabaseFetcher ] 👨‍🔧 registerDevice: Pass with given serial number not found."))
-            .flatMap { pass in
-                Device.query(on: db)
-                    .filter(\._$deviceLibraryIdentifier == deviceLibraryIdentifier)
-                    .filter(\._$pushToken == pushToken)
-                    .first()
-                    .flatMap { device in
-                        if let device = device {
-                            self.logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 registerDevice: Device exists, creating new registration")
-                            return Self.createRegistration(device: device, pass: pass, on: db, with: eventLoop)
-                        } else {
-                            self.logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 registerDevice: Creating new device and registration")
-                            let newDevice = Device(deviceLibraryIdentifier: deviceLibraryIdentifier, pushToken: pushToken)
-                            
-                            return newDevice
-                                .create(on: db)
-                                .flatMap { _ in Self.createRegistration(device: newDevice, pass: pass, on: db, with: eventLoop) }
-                        }
-                    }
-            }
+        guard let pass else {
+            throw Abort(.notFound, reason: "[ PassKitDatabaseFetcher ] 👨‍🔧 registerDevice: Pass with given serial number not found.")
+        }
+        let device = try await Device.query(on: db)
+            .filter(\._$deviceLibraryIdentifier == deviceLibraryIdentifier)
+            .filter(\._$pushToken == pushToken)
+            .first()
+        
+        if let device {
+            logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 registerDevice: Device exists, creating new registration")
+            return try await Self.createRegistration(device: device, pass: pass, on: db)
+        } else {
+            logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 registerDevice: Creating new device and registration")
+            let newDevice = Device(deviceLibraryIdentifier: deviceLibraryIdentifier, pushToken: pushToken)
+            
+            try await newDevice.create(on: db)
+            return try await Self.createRegistration(device: newDevice, pass: pass, on: db)
+        }
     }
     
-    func unregisterDevice(deviceLibraryIdentifier: String, serialNumber: UUID, on db: Database) -> EventLoopFuture<HTTPStatus> {
-        return Registration.for(deviceLibraryIdentifier: deviceLibraryIdentifier, on: db)
+    func unregisterDevice(deviceLibraryIdentifier: String, serialNumber: UUID, on db: Database) async throws -> HTTPStatus {
+        let registration = try await Registration.for(deviceLibraryIdentifier: deviceLibraryIdentifier, on: db)
             .filter(Pass.self, \._$id == serialNumber)
             .first()
-            .unwrap(or: Abort(.notFound, reason: "unregisterDevice: Pass with serialNumber for deviceLibraryIdentifier not found."))
-            .flatMap { $0.delete(on: db).map { .ok } }
+        guard let registration else {
+            throw Abort(.notFound, reason: "unregisterDevice: Pass with serialNumber for deviceLibraryIdentifier not found.")
+        }
+        try await registration.delete(on: db)
+        return .ok
     }
     
-    func latestVersionOfPass(serialNumber: UUID, ifModifiedSince: TimeInterval, on db: Database, with eventLoop: EventLoop) -> EventLoopFuture<Response> {
+    func latestVersionOfPass(serialNumber: UUID, ifModifiedSince: TimeInterval, on db: Database) async throws -> Response {
         logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: Try return latest version of pass.")
         let workingDirectoryURL = URL(fileURLWithPath: directoryConfiguration.workingDirectory, isDirectory: true)
         guard fileExists(at: workingDirectoryURL.path, isDirectory: true) else {
             logger.error("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: Working directory does not exist.")
-            return eventLoop.makeFailedFuture(Abort(.notFound, reason: "Working directory does not exist."))
+            throw Abort(.notFound, reason: "Working directory does not exist.")
         }
         guard fileExists(at: certificateURL.path) else {
             logger.error("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: Certificate does not exist at path \(certificateURL.path)")
-            return eventLoop.makeFailedFuture(Abort(.notFound, reason: "Certificate does not exist."))
+            throw Abort(.notFound, reason: "Certificate does not exist.")
         }
         guard fileExists(at: wwdrURL.path) else {
             logger.error("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: WWDR does not exist at path \(wwdrURL.path)")
-            return eventLoop.makeFailedFuture(Abort(.notFound, reason: "WWDR does not exist."))
+            throw Abort(.notFound, reason: "WWDR does not exist.")
         }
         guard fileExists(at: templateURL.path) else {
             logger.error("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: Template does not exist at path \(templateURL.path)")
-            return eventLoop.makeFailedFuture(Abort(.notFound, reason: "Template does not exist."))
+            throw Abort(.notFound, reason: "Template does not exist.")
         }
-        return Pass.for(serialNumber: serialNumber, on: db)
-            .flatMap { pass -> EventLoopFuture<Response> in
-                self.logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: Successfully loaded latest version of pass from db")
-                guard ifModifiedSince < (pass.modified ?? Date.distantPast).timeIntervalSince1970 else {
-                    self.logger.warning("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: Pass wasn't modified since value \"ifModifiedSince\".")
-                    return eventLoop.makeFailedFuture(Abort(.notModified, reason: "latestVersionOfPass: Pass wasn't modified since value \"ifModifiedSince\"."))
-                }
-                self.logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: Try generate pass…")
-                return eventLoop.future(pass)
-                    .generatePass(certificateURL: self.certificateURL, certificatePassword: self.certificatePassword, wwdrURL: self.wwdrURL, templateURL: self.templateURL, destinationURL: workingDirectoryURL, logger: self.logger)
-                    .map { data in
-                        self.logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: Successfully generated pass")
-                        let body = Response.Body(data: data)
-                        
-                        var headers = HTTPHeaders()
-                        headers.add(name: .contentType, value: "application/vnd.apple.pkpass")
-                        headers.add(name: .lastModified, value: String((pass.modified ?? Date.distantPast).timeIntervalSince1970))
-                        headers.add(name: .contentTransferEncoding, value: "binary")
-                        
-                        return Response(status: .ok, headers: headers, body: body)
-                    }
-            }
+        let pass = try await Pass.for(serialNumber: serialNumber, on: db)
+        logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: Successfully loaded latest version of pass from db")
+        guard ifModifiedSince < (pass.modified ?? Date.distantPast).timeIntervalSince1970 else {
+            logger.warning("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: Pass wasn't modified since value \"ifModifiedSince\".")
+            throw Abort(.notModified, reason: "latestVersionOfPass: Pass wasn't modified since value \"ifModifiedSince\".")
+        }
+        logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: Try generate pass…")
+        
+        let generatorConfiguration = PassGeneratorConfiguration(
+            certificate: .init(url: certificateURL, password: certificatePassword),
+            wwdrURL: wwdrURL,
+            templateURL: templateURL)
+        let generator = PassGenerator(configuration: generatorConfiguration, logger: logger)
+        let data = try await generator.generatePass(pass.pass)
+        logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 latestVersionOfPass: Successfully generated pass")
+        let body = Response.Body(data: data)
+        
+        var headers = HTTPHeaders()
+        headers.add(name: .contentType, value: "application/vnd.apple.pkpass")
+        headers.add(name: .lastModified, value: String((pass.modified ?? Date.distantPast).timeIntervalSince1970))
+        headers.add(name: .contentTransferEncoding, value: "binary")
+        
+        return Response(status: .ok, headers: headers, body: body)
     }
     
-    func tokensForPass(id: UUID, on db: Database) -> EventLoopFuture<[String]> {
-        registrationsForPass(id: id, on: db)
-            .map { $0.map { $0.device.pushToken } }
+    func tokensForPass(id: UUID, on db: Database) async throws -> [String] {
+        try await registrationsForPass(id: id, on: db)
+            .map { $0.device.pushToken }
     }
     
-    func sendPushNotificationsForPass(id: UUID, type: String, on db: Database, using apns: Application.APNS) throws -> EventLoopFuture<Void> {
+    func sendPushNotificationsForPass(id: UUID, type: String, on db: Database, using apns: Application.APNS) async throws {
         let destinationURL = URL(fileURLWithPath: directoryConfiguration.workingDirectory, isDirectory: true)
             .appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: destinationURL, withIntermediateDirectories: false)
         let pemCertURL = destinationURL.appendingPathComponent("cert.pem")
         let pemKeyURL = destinationURL.appendingPathComponent("key.pem")
         var oldConfiguration: APNSwiftConfiguration?
-        return db.eventLoop.future()
-            .flatMap { PassGenerator.generatePemCertificate(from: self.certificateURL, to: pemCertURL, password: self.certificatePassword, on: db.eventLoop) }
-            .flatMapErrorThrowing { error in
-                if case let PassGeneratorError.cannotGenerateCertificate(terminationStatus) = error {
-                    self.logger.error("[ PassKitDatabaseFetcher ] 👨‍🔧 Failed generating pem cert with termination status: \(terminationStatus)")
-                }
-                throw error
-            }
-            .flatMap { PassGenerator.generatePemKey(from: self.certificateURL, to: pemKeyURL, password: self.certificatePassword, on: db.eventLoop) }
-            .flatMapErrorThrowing { error in
-                if case let PassGeneratorError.cannotGenerateKey(terminationStatus) = error {
-                    self.logger.error("[ PassKitDatabaseFetcher ] 👨‍🔧 Failed generating pem key with termination status: \(terminationStatus)")
-                }
-                throw error
-            }
-            .flatMapThrowing {
-                self.logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 sendPushNotificationsForPass: Change apns configuration to passkit certs")
-                oldConfiguration = apns.configuration
-                let authenticationMethod = try APNSwiftConfiguration.AuthenticationMethod.tls(privateKeyPath: pemKeyURL.path, pemPath: pemCertURL.path, pemPassword: self.certificatePassword.bytes)
-                let apnsConfig = APNSwiftConfiguration(authenticationMethod: authenticationMethod, topic: "", environment: .production, logger: self.logger)
-                apns.configuration = apnsConfig
-            }
-            .flatMap { self.registrationsForPass(id: id, on: db) }
-            .flatMap {
-                $0.map { registration in
-                    let payload = "{}".data(using: .utf8)!
-                    var rawBytes = ByteBufferAllocator().buffer(capacity: payload.count)
-                    rawBytes.writeBytes(payload)
+        
+        try await generatePemCertificate(from: certificateURL, with: certificatePassword, to: pemCertURL)
+        try await generatePemKey(from: certificateURL, with: certificatePassword, to: pemKeyURL)
+        
+        defer {
+            logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 sendPushNotificationsForPass: Change back apns configuration and remove pem key and cert")
+            apns.configuration = oldConfiguration
+            try? FileManager.default.removeItem(at: destinationURL)
+        }
+        logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 sendPushNotificationsForPass: Change apns configuration to passkit certs")
+        oldConfiguration = apns.configuration
+        let authenticationMethod = try APNSwiftConfiguration.AuthenticationMethod.tls(privateKeyPath: pemKeyURL.path, pemPath: pemCertURL.path, pemPassword: certificatePassword.bytes)
+        let apnsConfig = APNSwiftConfiguration(authenticationMethod: authenticationMethod, topic: "", environment: .production, logger: logger)
+        apns.configuration = apnsConfig
+        
+        let registrations = try await registrationsForPass(id: id, on: db)
+        for registration in registrations {
+            let payload = "{}".data(using: .utf8)!
+            var rawBytes = ByteBufferAllocator().buffer(capacity: payload.count)
+            rawBytes.writeBytes(payload)
+            do {
+                try await apns.send(rawBytes: rawBytes, pushType: .background, to: registration.device.pushToken, expiration: nil, priority: nil, collapseIdentifier: nil, topic: type, logger: logger)
+            } catch {
+                // Unless APNs said it was a bad device token, just ignore the error.
+                if case let APNSwiftError.ResponseError.badRequest(response) = error, response == .badDeviceToken {
+                    logger.warning("[ PassKitDatabaseFetcher ] 👨‍🔧 Failed to send push. Deleting registration.")
                     
-                    return apns.send(rawBytes: rawBytes, pushType: .background, to: registration.device.pushToken, topic: type)
-                        .flatMapError {
-                            // Unless APNs said it was a bad device token, just ignore the error.
-                            guard case let APNSwiftError.ResponseError.badRequest(response) = $0, response == .badDeviceToken else {
-                                return db.eventLoop.future()
-                            }
-                            self.logger.warning("[ PassKitDatabaseFetcher ] 👨‍🔧 Failed to send push. Deleting registration.")
-                            
-                            // Be sure the device deletes before the registration is deleted.
-                            // If you let them run in parallel issues might arise depending on
-                            // the hooks people have set for when a registration deletes, as it
-                            // might try to delete the same device again.
-                            return registration.device.delete(on: db)
-                                .flatMapError { _ in db.eventLoop.future() }
-                                .flatMap { registration.delete(on: db) }
-                    }
+                    // Be sure the device deletes before the registration is deleted.
+                    // If you let them run in parallel issues might arise depending on
+                    // the hooks people have set for when a registration deletes, as it
+                    // might try to delete the same device again.
+                    try? await registration.device.delete(on: db)
+                    try? await registration.delete(on: db)
                 }
-                .flatten(on: db.eventLoop)
-                .always { _ in
-                    self.logger.debug("[ PassKitDatabaseFetcher ] 👨‍🔧 sendPushNotificationsForPass: Change back apns configuration and remove pem key and cert")
-                    apns.configuration = oldConfiguration
-                    try? FileManager.default.removeItem(at: destinationURL)
-                }
+            }
+        }
+    }
+    
+    /// Generate a pem key from certificate
+    /// - parameters:
+    ///     - certificateURL: Pass .p12 certificate url.
+    ///     - pemKeyURL: Destination url of .pem key file
+    ///     - password: Passowrd of certificate.
+    private func generatePemKey(from certificateURL: URL, with password: String, to pemKeyURL: URL) async throws {
+        logger.debug("try generate pem key", metadata: [
+            "certificateURL": .stringConvertible(certificateURL),
+            "pemKeyURL": .stringConvertible(pemKeyURL)
+        ])
+        let result = try await Process.asyncExecute(URL(fileURLWithPath: "/usr/bin/openssl"),
+                                                    "pkcs12",
+                                                    "-in",
+                                                    certificateURL.path,
+                                                    "-nocerts",
+                                                    "-out",
+                                                    pemKeyURL.path,
+                                                    "-passin",
+                                                    "pass:" + password,
+                                                    "-passout",
+                                                    "pass:" + password)
+        guard result == 0 else {
+            logger.error("failed to generate pem key", metadata: [
+                "result": .stringConvertible(result)
+            ])
+            throw PassGeneratorError.cannotZip(terminationStatus: result)
+        }
+    }
+    
+    /// Generate a pem key from certificate
+    /// - parameters:
+    ///     - certificateURL: Pass .p12 certificate url.
+    ///     - pemKeyURL: Destination url of .pem certificate file
+    ///     - password: Passowrd of certificate.
+    private func generatePemCertificate(from certificateURL: URL, with password: String, to pemCertURL: URL) async throws {
+        logger.debug("try generate pem certificate", metadata: [
+            "certificateURL": .stringConvertible(certificateURL),
+            "pemCertURL": .stringConvertible(pemCertURL)
+        ])
+        let result = try await Process.asyncExecute(URL(fileURLWithPath: "/usr/bin/openssl"),
+                                                    "pkcs12",
+                                                    "-in",
+                                                    certificateURL.path,
+                                                    "-clcerts",
+                                                    "-nokeys",
+                                                    "-out",
+                                                    pemCertURL.path,
+                                                    "-passin",
+                                                    "pass:" + password)
+        guard result == 0 else {
+            logger.error("failed to generate pem certificate", metadata: [
+                "result": .stringConvertible(result)
+            ])
+            throw PassGeneratorError.cannotZip(terminationStatus: result)
         }
     }
 }
 
 extension PassKitDatabaseFetcher {
     
-    private func registrationsForPass(id: UUID, on db: Database) -> EventLoopFuture<[Registration]> {
-        Registration.query(on: db)
+    private func registrationsForPass(id: UUID, on db: Database) async throws -> [Registration] {
+        try await Registration.query(on: db)
             .join(Pass.self, on: \Registration._$pass.$id == \Pass._$id)
             .join(Device.self, on: \Registration._$device.$id == \Device._$id)
             .with(\._$pass)
@@ -236,103 +277,20 @@ extension PassKitDatabaseFetcher {
             .all()
     }
     
-    private static func createRegistration(device: Device, pass: Pass, on db: Database, with eventLoop: EventLoop) -> EventLoopFuture<HTTPStatus> {
-        Registration.for(deviceLibraryIdentifier: device.deviceLibraryIdentifier, on: db)
+    private static func createRegistration(device: Device, pass: Pass, on db: Database) async throws -> HTTPStatus {
+        let registration = try await Registration.for(deviceLibraryIdentifier: device.deviceLibraryIdentifier, on: db)
             .filter(Pass.self, \._$id == pass.id!)
             .first()
-            .flatMap { registration in
-                if registration != nil {
-                    // If the registration already exists, docs say to return a 200
-                    return eventLoop.makeSucceededFuture(.ok)
-                }
-                
-                let registration = Registration()
-                registration._$pass.id = pass.id!
-                registration._$device.id = device.id!
-                
-                return registration.create(on: db)
-                    .map { .created }
-            }
-    }
-}
-
-extension Dictionary where Value == AnyDatabaseFetcher {
-    
-    func get(for key: Key) throws-> Value {
-        guard let value = self[key] else {
-            throw Abort(.notFound)
+        if registration != nil {
+            // If the registration already exists, docs say to return a 200
+            return .ok
         }
-        return value
-    }
-}
-
-// Type erasure wrapper class
-public struct AnyDatabaseFetcher {
-    public let wwdrURL: URL
-    public let templateURL: URL
-    public let certificateURL: URL
-    public let certificatePassword: String
-    
-    private let _registrations: (_ deviceLibraryIdentifier: String, _ passesUpdatedSince: TimeInterval?, _ db: Database) -> EventLoopFuture<PassesForDeviceDto>
-    private let _saveLogs: (_ logs: [String], _ db: Database) -> EventLoopFuture<Void>
-    private let _deleteAllLogs: (_ db: Database, _ eventLoop: EventLoop) -> EventLoopFuture<HTTPStatus>
-    private let _getAllLogs: (_ db: Database) -> EventLoopFuture<[String]>
-    private let _registerDevice: (_ deviceLibraryIdentifier: String, _ serialNumber: UUID, _ pushToken: String, _ db: Database, _ eventLoop: EventLoop) throws -> EventLoopFuture<HTTPStatus>
-    private let _unregisterDevice: (_ deviceLibraryIdentifier: String, _ serialNumber: UUID, _ db: Database) -> EventLoopFuture<HTTPStatus>
-    private let _latestVersionOfPass: (_ serialNumber: UUID, _ ifModifiedSince: TimeInterval, _ db: Database, _ eventLoop: EventLoop) -> EventLoopFuture<Response>
-    private let _tokensForPass: (_ id: UUID, _ db: Database) -> EventLoopFuture<[String]>
-    private let _sendPushNotificationsForPass: (_ id: UUID, _ type: String, _ db: Database, _ apns: Application.APNS) throws -> EventLoopFuture<Void>
-    
-    public init<DatabaseFetcher: PassKitDatabaseFetcher>(_ databaseFetcher: DatabaseFetcher) {
-        self.wwdrURL = databaseFetcher.wwdrURL
-        self.templateURL = databaseFetcher.templateURL
-        self.certificateURL = databaseFetcher.certificateURL
-        self.certificatePassword = databaseFetcher.certificatePassword
         
-        _registrations = databaseFetcher.registrations
-        _saveLogs = databaseFetcher.saveLogs
-        _getAllLogs = databaseFetcher.getAllLogs
-        _deleteAllLogs = databaseFetcher.deleteAllLogs
-        _registerDevice = databaseFetcher.registerDevice
-        _unregisterDevice = databaseFetcher.unregisterDevice
-        _latestVersionOfPass = databaseFetcher.latestVersionOfPass
-        _tokensForPass = databaseFetcher.tokensForPass
-        _sendPushNotificationsForPass = databaseFetcher.sendPushNotificationsForPass
-    }
-    
-    func registrations(forDeviceLibraryIdentifier deviceLibraryIdentifier: String, passesUpdatedSince: TimeInterval?, on db: Database) -> EventLoopFuture<PassesForDeviceDto> {
-        _registrations(deviceLibraryIdentifier, passesUpdatedSince, db)
-    }
-    
-    func saveLogs(_ logs: [String], on db: Database) -> EventLoopFuture<Void> {
-        _saveLogs(logs, db)
-    }
-    
-    func getAllLogs(on db: Database) -> EventLoopFuture<[String]> {
-        _getAllLogs(db)
-    }
-    
-    func deleteAllLogs(on db: Database, with eventLoop: EventLoop) -> EventLoopFuture<HTTPStatus> {
-        _deleteAllLogs(db, eventLoop)
-    }
-    
-    func registerDevice(deviceLibraryIdentifier: String, serialNumber: UUID, pushToken: String, on db: Database, with eventLoop: EventLoop) throws -> EventLoopFuture<HTTPStatus> {
-        try _registerDevice(deviceLibraryIdentifier, serialNumber, pushToken, db, eventLoop)
-    }
-    
-    func unregisterDevice(deviceLibraryIdentifier: String, serialNumber: UUID, on db: Database) -> EventLoopFuture<HTTPStatus> {
-        _unregisterDevice(deviceLibraryIdentifier, serialNumber, db)
-    }
-    
-    func latestVersionOfPass(serialNumber: UUID, ifModifiedSince: TimeInterval, on db: Database, with eventLoop: EventLoop) -> EventLoopFuture<Response> {
-        _latestVersionOfPass(serialNumber, ifModifiedSince, db, eventLoop)
-    }
-    
-    func tokensForPass(id: UUID, on db: Database) -> EventLoopFuture<[String]> {
-        _tokensForPass(id, db)
-    }
-    
-    func sendPushNotificationsForPass(id: UUID, type: String, on db: Database, using apns: Application.APNS) throws -> EventLoopFuture<Void> {
-        try _sendPushNotificationsForPass(id, type, db, apns)
+        let newRegistration = Registration()
+        newRegistration._$pass.id = pass.id!
+        newRegistration._$device.id = device.id!
+        
+        try await newRegistration.create(on: db)
+        return .created
     }
 }

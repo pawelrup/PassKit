@@ -1,23 +1,15 @@
-//
-//  ApplePassMiddleware.swift
-//
-//
-//  Created by Pawel Rup on 20/02/2020.
-//
-
 import Vapor
 
 /// Checks request has proper authorization header.
-struct ApplePassMiddleware: Middleware {
+struct ApplePassMiddleware: AsyncMiddleware {
     let authorizationCode: String
-
-    func respond(to request: Request, chainingTo next: Responder) -> EventLoopFuture<Response> {
+    
+    func respond(to request: Request, chainingTo next: AsyncResponder) async throws -> Response {
         let auth = request.headers["Authorization"]
         guard auth.first == "ApplePass \(authorizationCode)" else {
-            return request.eventLoop.makeFailedFuture(Abort(.unauthorized))
+            throw Abort(.unauthorized)
         }
-
-        return next.respond(to: request)
+        return try await next.respond(to: request)
     }
 }
 
