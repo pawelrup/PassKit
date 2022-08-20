@@ -5,10 +5,10 @@ import PackageDescription
 
 // Dependencies declare other packages that this package depends on.
 let dependencies: [Package.Dependency] = [
-    .package(url: "https://github.com/vapor/vapor.git", .upToNextMinor(from: "4.62.0")),
-    .package(url: "https://github.com/vapor/fluent.git", .upToNextMinor(from: "4.4.0")),
+    .package(url: "https://github.com/vapor/vapor.git", .upToNextMinor(from: "4.65.1")),
+    .package(url: "https://github.com/vapor/fluent.git", .upToNextMinor(from: "4.5.0")),
     .package(url: "https://github.com/vapor/apns.git", .upToNextMinor(from: "3.0.0")),
-    .package(url: "https://github.com/apple/swift-log.git", .upToNextMinor(from: "1.4.2")),
+    .package(url: "https://github.com/apple/swift-log.git", .upToNextMinor(from: "1.4.4")),
     .package(url: "https://github.com/pawelrup/PassGenerator.git", .upToNextMinor(from: "1.3.0"))
 ]
 
